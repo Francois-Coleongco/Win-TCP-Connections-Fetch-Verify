@@ -1,22 +1,43 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
+using System.Diagnostics;
+using System.Net.Http.Json;
 using System.Runtime.InteropServices;
+
+public class AbuseIpData
+{
+    public string IpAddress { get; set; }
+    public bool IsPublic { get; set; }
+    public int IpVersion { get; set; }
+    public bool IsWhitelisted { get; set; }
+    public int AbuseConfidenceScore { get; set; }
+    public string? CountryCode { get; set; }
+    public string? UsageType { get; set; }
+    public string? Isp { get; set; }
+    public string? Domain { get; set; }
+    public List<string>? Hostnames { get; set; }
+    public bool IsTor { get; set; }
+    public int TotalReports { get; set; }
+    public int NumDistinctUsers { get; set; }
+    public string? LastReportedAt { get; set; } // or DateTime? if you expect real dates
+}
+
+public class AbuseIpResponse
+{
+    public AbuseIpData? Data { get; set; }
+}
+
 public class TcpConnection
 {
-    public string LocalAddress { get; set; }
+    public required string LocalAddress { get; set; }
     public ushort LocalPort { get; set; }
-    public string RemoteAddress { get; set; }
+    public required string RemoteAddress { get; set; }
     public ushort RemotePort { get; set; }
-    public string State { get; set; }
+    public required string State { get; set; }
     public int ProcessId { get; set; }
-    public string ProcessName { get; set; }
 }
 public class FetchConns
 {
-    FetchConns() {
-        _httpClient.DefaultRequestHeaders.Add("Key", "MYKEY SHOULD BE PASSED BY THE USER INTO THE PROGRAM AND THEY CAN CHOOSE IT TO BE SAVED TO CONFIGURATION FOR SUBSEQUENT APPLICATION BOOTS"); // Replace with your actual API key
-    }
-
     public const int AF_INET = 2;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -121,29 +142,34 @@ public class FetchConns
     {
         Console.WriteLine($"Verifying IP Address: {RemoteIP}");
         await Task.Delay(1000);
-        bool api_res = false;
 
-        await _httpClient.GetAsync($"https://api.abuseipdb.com/api/v2/check?ipAddress={RemoteIP}").ContinueWith(response =>
-        {
-            if (response.IsCompletedSuccessfully && response.Result.IsSuccessStatusCode)
+        var response = await _httpClient.GetAsync($"https://api.abuseipdb.com/api/v2/check?ipAddress={RemoteIP}");
+        
+        if (response.IsSuccessStatusCode)
             {
-                var content = response.Result.Content.ReadAsStringAsync().Result;
-                write content to a file for logging purposes
-                api_res = true;
-            }
-            else
+            var content = await response.Content.ReadFromJsonAsync<AbuseIpResponse>();
+            // write content to a file for logging purposes
+            Console.WriteLine("Data was null, something went wrong with the API call.");
+            for (int i = 0; i < 4; ++i)
             {
-                Console.WriteLine($"Failed to verify IP Address {RemoteIP}: {response.Result.StatusCode}");
+                if (content?.Data == null)
+                {
+                    Console.WriteLine($"retrying request for {RemoteIP}, previous call failed...");
+                    response = await _httpClient.GetAsync($"https://api.abuseipdb.com/api/v2/check?ipAddress={RemoteIP}");
+                    content = await response.Content.ReadFromJsonAsync<AbuseIpResponse>();
+                    await Task.Delay(1000);
+                }
             }
-        });
 
-        if (!api_res)
-        {
-            Console.WriteLine($"IP Address {RemoteIP} is INVALID or has issues.");
-            badConns.Add($"{RemoteIP}");
-        } else
-        {
-            Console.WriteLine($"IP Address {RemoteIP} VALID and has no issues.");
+            if (content?.Data == null)
+            {
+                throw new Exception("VerifyIPAddress could not get a valid response");
+            }
+
+            if (content.Data.AbuseConfidenceScore >= 80)
+            {
+                badConns.Add(RemoteIP);
+            }
         }
     }
 
@@ -165,7 +191,18 @@ public class FetchConns
             seenIPs.Add(conn.RemoteAddress);
         }
 
-        Task.WaitAll(IPVerifications);
+        try
+        {
+            Task.WaitAll(IPVerifications);
+        } catch (AggregateException aggEx)
+        {
+            foreach (var ex in aggEx.InnerExceptions)
+            {
+                Console.WriteLine(ex.Message);
+
+            }
+        }
+
 
         return badIPs;
     }
@@ -177,6 +214,11 @@ public class FetchConns
         {
             Console.WriteLine($"Local: {conn.LocalAddress}:{conn.LocalPort}, Remote: {conn.RemoteAddress}:{conn.RemotePort}, State: {conn.State}, PID: {conn.ProcessId}");
         }
+    }
+
+    public FetchConns()
+    {
+        _httpClient.DefaultRequestHeaders.Add("Key", ""); // MYKEY SHOULD BE PASSED BY THE USER INTO THE PROGRAM AND THEY CAN CHOOSE IT TO BE SAVED TO CONFIGURATION FOR SUBSEQUENT APPLICATION BOOTS
     }
 
 }
