@@ -6,12 +6,12 @@ using System.Runtime.InteropServices;
 
 public class AbuseIpData
 {
-    public string IpAddress { get; set; }
+    public required string IpAddress { get; set; }
     public bool IsPublic { get; set; }
     public int IpVersion { get; set; }
     public bool IsWhitelisted { get; set; }
     public int AbuseConfidenceScore { get; set; }
-    public string? CountryCode { get; set; }
+    public required string CountryCode { get; set; }
     public string? UsageType { get; set; }
     public string? Isp { get; set; }
     public string? Domain { get; set; }
@@ -35,6 +35,7 @@ public class TcpConnection
     public ushort RemotePort { get; set; }
     public required string State { get; set; }
     public int ProcessId { get; set; }
+    public required string ProcessPath { get; set; }
 }
 public class FetchConns
 {
@@ -132,7 +133,8 @@ public class FetchConns
                 RemoteAddress = new System.Net.IPAddress(BitConverter.GetBytes(row.remoteAddr)).ToString(),
                 RemotePort = Ntoh(row.remotePort),
                 State = row.state.ToString(),
-                ProcessId = (int)row.owningPid
+                ProcessId = (int)row.owningPid,
+                ProcessPath = Process.GetProcessById((int)row.owningPid).ProcessName
             };
             _connections[$"{conn.LocalAddress}:{conn.LocalPort}"] = conn; // keep this as the local because you could have multiple connections to the same remote address and port
 
@@ -150,8 +152,8 @@ public class FetchConns
 
         if (response.IsSuccessStatusCode)
         {
-            var content = await response.Content.ReadFromJsonAsync<AbuseIpResponse>();
-            // write content to a file for logging purposes
+            var content = await response.Content.ReadFromJsonAsync<AbuseIpResponse>(); // don't need to do try here because i use AggregateException for the WaitAll later
+
             Console.WriteLine("Data was null, something went wrong with the API call.");
             for (int i = 0; i < 4; ++i)
             {
@@ -173,6 +175,7 @@ public class FetchConns
 
             this._logWriter.WriteLine($"IpAddress: {content.Data.IpAddress}  IsPublic: {content.Data.IsPublic} IpVersion: {content.Data.IpVersion} IsWhitelisted: {content.Data.IsWhitelisted} AbuseConfidenceScore: {content.Data.AbuseConfidenceScore} CountryCode: {content.Data.CountryCode} UsageType: {content.Data.UsageType} Isp: {content.Data.Isp} Domain: {content.Data.Domain} Hostnames: {content.Data.Hostnames?.ToString()} IsTor: {content.Data.IsTor} TotalReports: {content.Data.TotalReports} NumDistinctUsers: {content.Data.NumDistinctUsers} LastReportedAt: {content.Data.LastReportedAt}");
 
+
             if (content.Data.AbuseConfidenceScore >= 80)
             {
                 badConns.Add(RemoteIP);
@@ -192,6 +195,8 @@ public class FetchConns
             {
                 Console.WriteLine($"IP Address {conn.RemoteAddress} has already been seen. Skipping verification.");
                 continue;
+
+
             }
             Task t = VerifyIPAddress(conn.RemoteAddress, badIPs);
             IPVerifications.Add(t);
