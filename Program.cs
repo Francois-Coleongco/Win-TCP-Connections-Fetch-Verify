@@ -38,6 +38,8 @@ public class TcpConnection
 }
 public class FetchConns
 {
+    StreamWriter _logWriter;
+
     public const int AF_INET = 2;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -90,7 +92,8 @@ public class FetchConns
         return (ushort)(((netshort & 0xFF) << 8) | ((netshort & 0xFF00) >> 8));
     }
 
-    public Dictionary<string, TcpConnection> GetTcpConnections() {
+    public Dictionary<string, TcpConnection> GetTcpConnections()
+    {
         IntPtr tcpTablePtr = IntPtr.Zero;
         int dwOutBufLen = 0;
         bool sort = true;
@@ -116,8 +119,8 @@ public class FetchConns
         int rowSize = Marshal.SizeOf<MIB_TCPROW_OWNER_PID>();
         int numEntries = Marshal.ReadInt32(tcpTablePtr);
         IntPtr currentRowPtr = IntPtr.Add(tcpTablePtr, sizeof(int));
-       
-        
+
+
 
         for (int i = 0; i < numEntries; i++, currentRowPtr = IntPtr.Add(currentRowPtr, rowSize))
         {
@@ -144,9 +147,9 @@ public class FetchConns
         await Task.Delay(1000);
 
         var response = await _httpClient.GetAsync($"https://api.abuseipdb.com/api/v2/check?ipAddress={RemoteIP}");
-        
+
         if (response.IsSuccessStatusCode)
-            {
+        {
             var content = await response.Content.ReadFromJsonAsync<AbuseIpResponse>();
             // write content to a file for logging purposes
             Console.WriteLine("Data was null, something went wrong with the API call.");
@@ -156,15 +159,19 @@ public class FetchConns
                 {
                     Console.WriteLine($"retrying request for {RemoteIP}, previous call failed...");
                     response = await _httpClient.GetAsync($"https://api.abuseipdb.com/api/v2/check?ipAddress={RemoteIP}");
+
                     content = await response.Content.ReadFromJsonAsync<AbuseIpResponse>();
+
                     await Task.Delay(1000);
                 }
             }
 
             if (content?.Data == null)
             {
-                throw new Exception("VerifyIPAddress could not get a valid response");
+                throw new Exception("Bad Response");
             }
+
+            this._logWriter.WriteLine($"IpAddress: {content.Data.IpAddress}  IsPublic: {content.Data.IsPublic} IpVersion: {content.Data.IpVersion} IsWhitelisted: {content.Data.IsWhitelisted} AbuseConfidenceScore: {content.Data.AbuseConfidenceScore} CountryCode: {content.Data.CountryCode} UsageType: {content.Data.UsageType} Isp: {content.Data.Isp} Domain: {content.Data.Domain} Hostnames: {content.Data.Hostnames?.ToString()} IsTor: {content.Data.IsTor} TotalReports: {content.Data.TotalReports} NumDistinctUsers: {content.Data.NumDistinctUsers} LastReportedAt: {content.Data.LastReportedAt}");
 
             if (content.Data.AbuseConfidenceScore >= 80)
             {
@@ -194,15 +201,14 @@ public class FetchConns
         try
         {
             Task.WaitAll(IPVerifications);
-        } catch (AggregateException aggEx)
+        }
+        catch (AggregateException aggEx)
         {
             foreach (var ex in aggEx.InnerExceptions)
             {
                 Console.WriteLine(ex.Message);
-
             }
         }
-
 
         return badIPs;
     }
@@ -219,6 +225,7 @@ public class FetchConns
     public FetchConns()
     {
         _httpClient.DefaultRequestHeaders.Add("Key", ""); // MYKEY SHOULD BE PASSED BY THE USER INTO THE PROGRAM AND THEY CAN CHOOSE IT TO BE SAVED TO CONFIGURATION FOR SUBSEQUENT APPLICATION BOOTS
+        _logWriter = new StreamWriter("abuse_ipdb_responses.log");
     }
 
 }
@@ -228,8 +235,6 @@ public class FetchConns
 
 class Fetch
 {
-
-    // Main Method
     public static void Main()
     {
         FetchConns fetchConns = new FetchConns();
